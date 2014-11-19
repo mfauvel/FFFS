@@ -8,6 +8,22 @@ from scipy import linalg
 import multiprocessing as mp
 from functools import partial
 
+def mylstsq(a, b, rcond):
+    '''
+    
+    Inputs:
+    a: a symmetric definite positive matrix d times d
+    b: a d times n matrix
+    Outputs:
+    x: a d times n matrix
+    '''
+    eps = sp.finfo(sp.float64).eps
+    if rcond>eps:
+        x = linalg.solve(a,b)
+    else:
+        x = linalg.lstsq(a,b)[0]
+    return x
+
 def safe_logdet(cov):
     '''
     The function computes a secure version of the logdet of a covariance matrix
@@ -16,10 +32,14 @@ def safe_logdet(cov):
     Outputs:
         the logdet
     '''
-    e = linalg.eigvalsh(cov)
     eps = sp.finfo(sp.float64).eps
-    e = sp.where(e<eps,eps,e)
-    return sp.sum(sp.log(e))
+    e = linalg.eigvalsh(cov)
+    if e.max()<eps:
+        rcond = eps
+    else:
+        rcond = e.min()/e.max()    
+    e = sp.where(e<eps,eps,e)    
+    return sp.sum(sp.log(e)),rcond
 
 def compute_v_cv_gmm(variable,model_cv,xt,yt,ids):
     """ Function that computes the accuracy of the model_cv using the variable : variable + ids
@@ -68,8 +88,8 @@ def compute_loocv_gmm(variable,model,x,y,ids,K_u,alpha,beta,log_prop_u):
         m  = (model.ni[c]*model.mean[c,ids] -x[j,ids])*alpha[c]    # Update the mean value
         xb = x[j,ids] - m                                     # x centered
         cov_u =  (model.cov[c,ids,:][:,ids] - sp.outer(xb,xb)*alpha[c])*beta    # Update the covariance matrix 
-        #Kloo[c] =  np.linalg.slogdet(cov_u)[1]  - 2*log_prop_u[c] + sp.vdot(xb,linalg.solve(cov_u,xb.T))    # Compute the new decision rule
-        Kloo[c] =  safe_logdet(cov_u)  - 2*log_prop_u[c] + sp.vdot(xb,linalg.solve(cov_u,xb.T))    # Compute the new decision rule
+        logdet,rcond = safe_logdet(cov_u)
+        Kloo[c] =   logdet - 2*log_prop_u[c] + sp.vdot(xb,mylstsq(cov_u,xb.T),rcond)    # Compute the new decision rule
         del cov_u,xb,m,c                   
                     
         yloo = sp.argmin(Kloo)+1
@@ -114,9 +134,10 @@ def worker_predict(xt,model,i,V,Q):
     K = sp.empty((nt,C))
     
     for c in range(C):
-        cst = sp.sum(sp.log(sp.absolute(linalg.eigvalsh(model.cov[c,:,:])))) -2*sp.log(model.prop[c])
+        logdet,rcond = safe_logdet(model.cov[c,:,:])
+        cst = logdet -2*sp.log(model.prop[c])
         xtc = xt - model.mean[c,:]
-        temp = linalg.solve(model.cov[c,:,:],xtc.T).T
+        temp = mylstsq(model.cov[c,:,:],xtc.T,rcond).T
         K[:,c] = sp.sum(xtc*temp,axis=1)+cst
         del temp,xtc
     Q.put(K)
@@ -125,17 +146,17 @@ def worker_predict(xt,model,i,V,Q):
 def compute_mahalanobis_distance(c,prop,mean,cov,xt):
     """ The function computes the decision rules for class c under the Gaussian Mixture Model
         Input:
-            prop,mean,cov : are the parameter of the model
+            prop,ni,mean,cov : are the parameter of the model
             xt : the testing samples
         Output:
             K: the decision function
             
         Used in GMM.predict_gmm()
     """
-    #cst = np.linalg.slogdet(cov[c,:,:])[1] -2*sp.log(prop[c]) # Pre compute the constant term
-    cst = safe_logdet(cov[c,:,:]) -2*sp.log(prop[c]) # Pre compute the constant term
+    logdet,rcond = safe_logdet(cov[c,:,:]) 
+    cst = logdet -2*sp.log(prop[c]) # Pre compute the constant term
     xtc = xt-mean[c,:]
-    temp = linalg.solve(cov[c,:,:],xtc.T).T
+    temp = mylstsq(cov[c,:,:],xtc.T,rcond).T
     K = sp.sum(xtc*temp,axis=1)+cst
     del temp, xtc
     return K
@@ -309,10 +330,10 @@ class GMM:# Gaussian Mixture Model
         
         ## Start the prediction for each class
         for c in range(C): 
-            #cst =  np.linalg.slogdet(self.cov[c,ids,:][:,ids])[1] - 2*sp.log(self.prop[c]) # Pre compute the constant term
-            cst =  safe_logdet(self.cov[c,ids,:][:,ids]) - 2*sp.log(self.prop[c]) # Pre compute the constant term
+            logdet,rcond = safe_logdet(self.cov[c,ids,:][:,ids])
+            cst =  logdet - 2*sp.log(self.prop[c]) # Pre compute the constant term
             xtc = xt[:,ids] - self.mean[c,ids]
-            temp = linalg.solve(self.cov[c,ids,:][:,ids],xtc.T).T
+            temp = mylstsq(self.cov[c,ids,:][:,ids],xtc.T,rcond).T
             K[:,c] = sp.sum(xtc*temp,axis=1)+cst
             del temp, xtc
         return K
@@ -345,7 +366,7 @@ class GMM:# Gaussian Mixture Model
         
         return err
     
-    def forward_selection(self,x,y,delta=0.1,maxvar=None,v=None):
+    def forward_selection(self,x,y,delta=0.1,maxvar=None,v=None,ncpus=None):
         """ Function that selects the most discriminative variables according to a forward search
             Inputs:
                 x,y :  the training samples and their labels
@@ -362,7 +383,8 @@ class GMM:# Gaussian Mixture Model
         C = int(y.max(0));  # Number of classes
         n = x.shape[0]      # Number of samples
         d = x.shape[1]      # Number of variables
-        ncpus=mp.cpu_count()# Get the number of core
+        if ncpus is None:
+            ncpus=mp.cpu_count()# Get the number of core
         
         ## Initialization
         r=0                 # Initialization of the counter
