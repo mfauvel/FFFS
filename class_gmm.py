@@ -10,7 +10,10 @@ from functools import partial
 
 def mylstsq(a, b, rcond):
     '''
-    
+    Compute a safe/fast least square fitting. 
+    For that particular case, the number of unknown parameters is equal to the number of equations. 
+    However, a is a covariance matrix that might estimated with a number of samples less than the number of variables, leading to a badly conditionned covariance matrix.
+    So, the rcond number is check: if it is ok, we use the fast linalg.solve function; otherwise, we use the slow, but safe, linalg.lstsq function.
     Inputs:
     a: a symmetric definite positive matrix d times d
     b: a d times n matrix
@@ -26,7 +29,7 @@ def mylstsq(a, b, rcond):
 
 def safe_logdet(cov):
     '''
-    The function computes a secure version of the logdet of a covariance matrix
+    The function computes a secure version of the logdet of a covariance matrix and it returns the rcondition number of the matrix.
     Inputs:
         cov
     Outputs:
