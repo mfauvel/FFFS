@@ -22,7 +22,10 @@ def mylstsq(a, b, rcond):
     '''
     eps = sp.finfo(sp.float64).eps
     if rcond>eps:
-        x = linalg.solve(a,b)
+        try:
+            x = linalg.solve(a,b)
+        except linalg.LinAlgError:
+            x = linalg.lstsq(a,b)[0]
     else:
         x = linalg.lstsq(a,b)[0]
     return x
@@ -38,7 +41,7 @@ def safe_logdet(cov):
     eps = sp.finfo(sp.float64).eps
     e = linalg.eigvalsh(cov)
     if e.max()<eps:
-        rcond = eps
+        rcond = 0
     else:
         rcond = e.min()/e.max()    
     e = sp.where(e<eps,eps,e)    
@@ -92,7 +95,7 @@ def compute_loocv_gmm(variable,model,x,y,ids,K_u,alpha,beta,log_prop_u):
         xb = x[j,ids] - m                                     # x centered
         cov_u =  (model.cov[c,ids,:][:,ids] - sp.outer(xb,xb)*alpha[c])*beta    # Update the covariance matrix 
         logdet,rcond = safe_logdet(cov_u)
-        Kloo[c] =   logdet - 2*log_prop_u[c] + sp.vdot(xb,mylstsq(cov_u,xb.T),rcond)    # Compute the new decision rule
+        Kloo[c] =   logdet - 2*log_prop_u[c] + sp.vdot(xb,mylstsq(cov_u,xb.T,rcond))    # Compute the new decision rule
         del cov_u,xb,m,c                   
                     
         yloo = sp.argmin(Kloo)+1
@@ -230,10 +233,10 @@ class GMM:# Gaussian Mixture Model
         self.mean = sp.empty((C,d))  # Vector of means
         self.cov = sp.empty((C,d,d)) # Matrix of covariance
         
-        ## Learn the parameter of the model
+        ## Learn the parameter of the model for each class
         for i in range(C):
             j = sp.where(y==(i+1))[0]
-            self.ni[i] = float(j.size)    # Indices starts at zero in Python !
+            self.ni[i] = float(j.size)    
             self.prop[i] = self.ni[i]/n
             self.mean[i,:] = sp.mean(x[j,:],axis=0)
             self.cov[i,:,:] = sp.cov(x[j,:],bias=1,rowvar=0)  # Normalize by ni to be consistent with the update formulae
@@ -242,13 +245,16 @@ class GMM:# Gaussian Mixture Model
             
             
     def update(self,ids=None,tau=None):
-        """ Function that constructs an updated model by adding the regularization term OR according to the variable ids selected with the forward strategy.
+        """ 
+        Function that constructs an updated model by adding the regularization term 
+        OR 
+        according to the variable ids selected with the forward strategy.
         Input:
             ids: the selected variables
         Output
             update_model: the model updated
         """
-        update_model = GMM()
+        update_model = GMM() # Create a new GMM object
         update_model.prop = sp.copy(self.prop)
         update_model.ni = sp.copy(self.ni)
         if ids is None:
@@ -268,6 +274,7 @@ class GMM:# Gaussian Mixture Model
         """ Function that predict the label for sample xt using the learned model
             Inputs:
                 xt: the samples to be classified
+                do_parallel: indicate if the computation should be done in parallel or not (for the case where the conditioning is bad, it should be faster)
             Outputs:
                 y: the class
                 K: the decision value for each class             
@@ -309,6 +316,7 @@ class GMM:# Gaussian Mixture Model
             for p in processes:
                 p.join()           
             
+            del p,Q,V,processes
         ## Assign the label to the minimum value of K 
         yp = sp.argmin(K,1)+1
         return yp,K
@@ -319,7 +327,6 @@ class GMM:# Gaussian Mixture Model
             Inputs:
                 xt: the samples to be classified
                 ids: the variables to be used in the model
-                get_class: optional argument to get the class for each samples (==1) or just the decision function (==0)
             Outputs:
             y: the class
             K: the decision value for each class             
@@ -342,7 +349,8 @@ class GMM:# Gaussian Mixture Model
         return K
 
     def cross_validation(self,x,y,tau,v=5):
-        """ Function that computes the cross validation accuracy for the value tau of the regularization
+        """ 
+        Function that computes the cross validation accuracy for the value tau of the regularization
         Input:
             x : the training samples
             y : the labels
@@ -361,7 +369,7 @@ class GMM:# Gaussian Mixture Model
             self.learn_gmm(x[cv.it[i],:], y[cv.it[i]])
             partial_f = partial(regularization_predict,model=self,xT=x[cv.iT[i],:],yT=y[cv.iT[i]])
             p = mp.Pool(processes=ncpus)    # Start ncpus worker process
-            err += p.map(partial_f,tau)     # Start the worker
+            err += sp.asarray(p.map(partial_f,tau))     # Start the worker
             p.close()                       # No more worker -> do the job
             p.join()                        # Wait until the end
             del partial_f
@@ -434,7 +442,7 @@ class GMM:# Gaussian Mixture Model
             # Pre-update the models
             model_pre_cv = []
             for i in range(v):
-                model_pre_cv.append(GMM(size=C,d=d))
+                model_pre_cv.append(GMM(size=C,d=d))# List of updated GMM models
                 X,Y=x[cv.iT[i],:], y[cv.iT[i]]
                 nu = float(Y.size)
                 for j in range(C):                  #Update the model
@@ -457,6 +465,7 @@ class GMM:# Gaussian Mixture Model
                     err += sp.asarray(p.map(partial_f,variable)) 
                     p.close()
                     p.join()
+                    del p
 
                 err /= v
                 ## Select the variable that provides the highest loocv
