@@ -7,7 +7,7 @@ Created on 12 déc. 2014
 import scipy as sp
 from scipy import linalg
 import multiprocessing as mp
-from functools import partial
+#from functools import partial
 
 
 ## Utilitary functions
