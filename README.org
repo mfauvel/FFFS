@@ -17,7 +17,7 @@
   algebra library is required too. [[https://github.com/xianyi/OpenBLAS][Openblas]] is a good option.
 
 * Usage
-
+  See the file ~test_sparse_classif.py~
   
 
   

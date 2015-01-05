@@ -7,7 +7,7 @@ Created on 12 déc. 2014
 import scipy as sp
 from scipy import linalg
 import multiprocessing as mp
-#from functools import partial
+from functools import partial
 
 
 ## Utilitary functions
@@ -132,7 +132,6 @@ def compute_loocv_gmm(variable,model,x,y,ids,K_u,alpha,beta,log_prop_u):
         loocv_temp += float(yloo==y[j])                   # Check the correct/incorrect classification rule
     ids.pop()                                                         # Remove the current variable 
     return loocv_temp/n                                           # Compute loocv for variable 
-
 
 class CV:#Cross_validation
     def __init__(self):
@@ -331,13 +330,14 @@ class GMM:
         
             ## Start the forward search
             while(r<maxvar):            
-                partial_f=partial(compute_loocv_gmm,model=self,x=x,y=y,ids=ids,K_u=K_u,alpha=alpha,beta=beta,log_prop_u=log_prop_u) #Compute the loocv estimate for the variable [ids,variable[i]]
-                p = mp.Pool(processes=ncpus)        # Start ncpus worker process            
-                loocv = p.map(partial_f,variable)   # Start the worker
-                p.close()                       # No more worker -> do the job
-                p.join()                        # Wait until the end
-                del partial_f
-        
+                loocv = sp.zeros(variable.size)
+                pool = mp.Pool(processes=ncpus)
+                processes = [pool.apply(compute_loocv_gmm,args=(v,self,x,y,ids,K_u,alpha,beta,log_prop_u)) for v in variable]
+                pool.close()
+                pool.join()
+                for i,p in enumerate(processes):
+                    loocv[i] = p                
+                        
                 ## Select the variable that provides the highest loocv
                 t = sp.argmax(loocv)                # get the indice of the maximum of loocv
                 OA.append(loocv[t])                # add the value to loo

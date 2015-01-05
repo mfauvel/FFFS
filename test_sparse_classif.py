@@ -25,7 +25,16 @@ yp.shape=y.shape
 t = sp.where(yp==y)[0]
 print float(t.size)/y.size
 
+# 5-CV
 ids,error=model.forward_selection(x, y,delta=1.5,v=5)
+print 'Results for 5-CV'
+print ids
+print error
+print var
+
+# LOO CV
+ids,error=model.forward_selection(x, y,delta=1.5,v=None)
+print 'Results for LOO-CV'
 print ids
 print error
 print var
