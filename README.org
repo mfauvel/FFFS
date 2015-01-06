@@ -5,8 +5,9 @@
 * Objectives
   The  package provides  the python  codes to  perform a  fast forward
   feature selection using a Gaussian  Mixture Model.  The algorithm is
-  based on the following papers  [] and [[http://fauvel.mathieu.free.fr/data/ffs_gmm.pdf][Nonlinear parsimonious feature
-  selection for the classification of hyperspectral images]].
+  based  on the  following papers  [[http://arxiv.org/abs/1501.00857]] and
+  [[http://fauvel.mathieu.free.fr/data/ffs_gmm.pdf][Nonlinear parsimonious  feature selection for the  classification of
+  hyperspectral images]].
 
 * Install
   Just download the  file ~npfs.py~ and import it with  python. It has

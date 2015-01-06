@@ -7,7 +7,6 @@ Created on 12 déc. 2014
 import scipy as sp
 from scipy import linalg
 import multiprocessing as mp
-from functools import partial
 
 
 ## Utilitary functions
@@ -24,7 +23,7 @@ def mylstsq(a, b, rcond):
     x: a d times n matrix
     '''
     eps = sp.finfo(sp.float64).eps
-    if rcond>eps: # If the conidtion number is not too bad try linear system
+    if rcond>eps: # If the condition number is not too bad try linear system
         try:
             x = linalg.solve(a,b)
         except linalg.LinAlgError: # If error, use least square estimations
@@ -52,7 +51,7 @@ def safe_logdet(cov):
 
 def regularization_predict(tau,model,xT,yT):
     """ Function that computes the prediction of the GMM for the cross validation. 
-        It will be used together with "partial" to be applied in parallel mode
+        It will be used together with pool.apply to be applied in parallel mode
         Input:
             model : the GMM mode learns without regularization
             xT : the samples to be classified
