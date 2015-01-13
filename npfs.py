@@ -172,6 +172,7 @@ class GMM:
             self.mean = []
             self.cov =[]
             self.tau = None
+            self.ids = None
         else:
             self.ni = sp.empty((size,1))    # Vector of number of samples for each class
             self.prop = sp.empty((size,1))  # Vector of proportion
