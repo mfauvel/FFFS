@@ -9,7 +9,7 @@ from scipy import linalg
 import multiprocessing as mp
 
 
-## Utilitary functions
+## Utilitary functions
 def mylstsq(a, b, rcond):
     '''
     Compute a safe/fast least square fitting. 
@@ -48,6 +48,26 @@ def safe_logdet(cov):
         rcond = e.min()/e.max()    
     e = sp.where(e<eps,eps,e)    
     return sp.sum(sp.log(e)),rcond
+
+def compute_JFD(v,model,x,y,ids,ind):
+    '''
+    '''
+    # Get parameters
+    C=int(y.max())
+    ids.append(v)
+    JM = 0.0
+    for i in range(C):
+        for j in range(i+1,C):
+            md = (model.mean[i,ids]-model.mean[j,ids])
+            cs = (model.cov[i,ids,:][:,ids]+model.cov[j,ids,:][:,ids])/2
+            di = linalg.det(model.cov[i,ids,:][:,ids])
+            dj = linalg.det(model.cov[j,ids,:][:,ids])
+            dij = linalg.det(cs)
+            bij = sp.dot(md,linalg.solve(cs,md))/8 + 0.5*sp.log(dij/sp.sqrt(di*dj))
+            JM += sp.sqrt(2*(1-sp.exp(-bij)))*model.prop[i]*model.prop[j]
+    JM*=2
+    ids.pop()
+    return ind,JM
 
 def regularization_predict(tau,model,xT,yT):
     """ Function that computes the prediction of the GMM for the cross validation. 
@@ -219,6 +239,7 @@ class GMM:
         Outputs:
             y: the class
             K: the decision value for each class      
+
         '''
         ## Get information from the data
         nt = xt.shape[0]        # Number of testing samples
@@ -379,13 +400,12 @@ class GMM:
             while(r<maxvar):
                 err=sp.zeros(variable.size)
                 pool = mp.Pool(processes=ncpus)     
-                processes =  [pool.apply(compute_v_cv_gmm, args=(variable,model_pre_cv[i],x[cv.iT[i],:],y[cv.iT[i]],ids)) for i in range(v)]
+                processes =  [pool.apply_async(compute_v_cv_gmm, args=(variable,model_pre_cv[i],x[cv.iT[i],:],y[cv.iT[i]],ids)) for i in xrange(v)]
                 pool.close()
                 pool.join()
                 for p in processes:
-                    err += p
+                    err += p.get()
                 err /= v
-                                               
                 del processes,pool                
                 ## Select the variable that provides the highest loocv
                 t = sp.argmax(err)                # get the indice of the maximum of loocv
@@ -403,3 +423,48 @@ class GMM:
                    
         ## Return the final value
         return ids,OA
+
+    def forward_selection_JM(self,x,y,delta=0.1,maxvar=None,ncpus=None):
+        '''
+        '''
+        ## Get some information from the variable
+        C = int(y.max(0));  # Number of classes
+        n = x.shape[0]      # Number of samples
+        d = x.shape[1]      # Number of variables
+        if ncpus is None:
+            ncpus=mp.cpu_count()# Get the number of core
+        
+        ## Initialization
+        r=0                 # Initialization of the counter
+        variable = sp.arange(d) # At step zero: d variables available
+        ids=[]              # and no selected variable
+        JMD=[]              # list of the evolution the OA estimation                
+        if maxvar is None:
+            maxvar = sp.floor(d/5)  # Select at max 20 % of the original number of variables
+
+        while(r<maxvar):
+            JMd = sp.zeros(variable.size)
+            pool = mp.Pool(processes=ncpus)
+            processes = [pool.apply_async(compute_JFD,args=(v,self,x,y,ids,ind)) for ind,v in enumerate(variable)]
+            pool.close()
+            pool.join()
+            for p in processes:
+                ind,jm = p.get()
+                JMd[ind] = jm
+            
+            ## Select the variable that provides the highest loocv
+            t = sp.argmax(JMd)                # get the indice of the maximum of loocv
+            JMD.append(JMd[t])                  # add the value to loo
+            if r==0:
+                    ids.append(variable[t])         # add the selected variable to the pool
+                    variable=sp.delete(variable,t)  # remove the selected variable from the initial set
+            elif (variable.size == 0) or (((JMD[r]-JMD[r-1])/JMD[r-1]*100) < delta):
+                JMD.pop()
+                break
+            else:
+                ids.append(variable[t])
+                variable=sp.delete(variable,t)
+            r =r+1
+        
+        ## Return the final value
+        return ids,JMD
