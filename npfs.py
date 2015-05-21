@@ -152,20 +152,23 @@ def compute_loocv_gmm(variable,model,x,y,ids,K_u,alpha,beta,log_prop_u):
     ids.pop()                                                         # Remove the current variable 
     return loocv_temp/n                                           # Compute loocv for variable 
 
-class CV:#Cross_validation
+class CV:
+    '''
+    This class implements the generation of several folds to be used in the cross validation
+    '''
     def __init__(self):
         self.it=[]
         self.iT=[]
-        
+
     def split_data(self,n,v=5):
-        """ The function split the data into v folds. Whatever the number of sample per class
+        ''' The function split the data into v folds. Whatever the number of sample per class
         Input:
             n : the number of samples
             v : the number of folds
         Output: None        
-        """
-        sp.random.seed(0)   # Set the random generator to the same initial state
-        step = int(sp.ceil(float(n)/v)) # Compute the number of samples in each fold
+        '''
+        step = n //v  # Compute the number of samples in each fold
+        sp.random.seed(1)   # Set the random generator to the same initial state
         t = sp.random.permutation(n)    # Generate random sampling of the indices
         
         indices=[]
@@ -181,6 +184,50 @@ class CV:#Cross_validation
             for j in l:            
                 temp = sp.concatenate((temp,sp.asarray(indices[j])))
             self.it.append(temp)
+
+    def split_data_class(self,y,v=5):
+        ''' The function split the data into v folds. The samples of each class are split approximatly in v folds
+        Input:
+            n : the number of samples
+            v : the number of folds
+        Output: None
+        '''
+        # Get parameters
+        n = y.size
+        C = y.max().astype('int')
+       
+        # Get the step for each class
+        tc = []
+        for j in range(v):
+            tempit = []
+            tempiT = []
+            for i in range(C):
+                # Get all samples for each class
+                t  = sp.where(y==(i+1))[0]
+                nc = t.size
+                stepc = nc // v # Step size for each class
+                if stepc == 0:
+                    print "Not enough sample to build "+ str(v) +" folds in class " + str(i)                                    
+                sp.random.seed(i)   # Set the random generator to the same initial state
+                tc = t[sp.random.permutation(nc)] # Random sampling of indices of samples for class i
+                        
+                # Set testing and training samples
+                if j < (v-1):
+                    start,end = j*stepc,(j+1)*stepc
+                else:
+                    start,end = j*stepc,nc
+                tempiT.extend(sp.asarray(tc[start:end])) #Testing
+                k = range(v)
+                k.remove(j)
+                for l in k:
+                    if l < (v-1):
+                        start,end = l*stepc,(l+1)*stepc
+                    else:
+                        start,end = l*stepc,nc
+                    tempit.extend(sp.asarray(tc[start:end])) #Training
+
+            self.it.append(tempit)
+            self.iT.append(tempiT)
             
 ## Gaussian Mixture Model (GMM) class
 class GMM:
@@ -287,7 +334,7 @@ class GMM:
         ns = x.shape[0]     # Number of samples
         np = tau.size       # Number of parameters to test
         cv = CV()           # Initialization of the indices for the cross validation
-        cv.split_data(ns)
+        cv.split_data_class(y)
         err = sp.zeros(np)  # Initialization of the error
         if ncpus is None:        
             ncpus=mp.cpu_count()    # Get the number of core
@@ -375,7 +422,7 @@ class GMM:
         
         else:
             cv=CV()                                 # Initialize the CV sets
-            cv.split_data(n,v=v)                    # Generate split indices for the data
+            cv.split_data_class(y,v=v)              # Generate split indices for the data
             
             ## Pre-update the models
             model_pre_cv = []
